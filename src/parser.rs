@@ -1,7 +1,5 @@
-use nom::branch::alt;
-use nom::bytes::streaming::{tag, take_while, take_while1, take_while_m_n};
-use nom::combinator::opt;
-use nom::sequence::{preceded, terminated, tuple};
+use std::num::NonZero;
+
 use nom::IResult;
 
 /// ; ABNF definition from HTML spec
@@ -36,83 +34,67 @@ pub fn is_lf(c: char) -> bool {
 }
 
 #[inline]
-pub fn is_cr(c: char) -> bool {
-    c == '\u{000D}'
-}
-
-#[inline]
-pub fn is_space(c: char) -> bool {
-    c == '\u{0020}'
-}
-
-#[inline]
-pub fn is_colon(c: char) -> bool {
-    c == '\u{003A}'
-}
-
-#[inline]
 pub fn is_bom(c: char) -> bool {
     c == '\u{feff}'
 }
 
-#[inline]
-pub fn is_name_char(c: char) -> bool {
-    matches!(c, '\u{0000}'..='\u{0009}'
-        | '\u{000B}'..='\u{000C}'
-        | '\u{000E}'..='\u{0039}'
-        | '\u{003B}'..='\u{10FFFF}')
+fn find_eol(bytes: &[u8]) -> Option<(usize, usize)> {
+    const CR: u8 = b'\r';
+    const LF: u8 = b'\n';
+    let first_match = memchr::memchr2(CR, LF, bytes)?;
+
+    match bytes[first_match] {
+        LF => Some((first_match, first_match + 1)),
+        CR => {
+            if first_match + 1 >= bytes.len() {
+                return None; // need more data to see if it's CRLF or just CR
+            }
+
+            // Cr lf
+            if bytes[first_match + 1] == LF {
+                Some((first_match, first_match + 2))
+            } else {
+                // just cr
+                Some((first_match, first_match + 1))
+            }
+        }
+        _ => unreachable!(),
+    }
 }
 
-#[inline]
-pub fn is_any_char(c: char) -> bool {
-    matches!(c, '\u{0000}'..='\u{0009}'
-        | '\u{000B}'..='\u{000C}'
-        | '\u{000E}'..='\u{10FFFF}')
-}
+pub fn line(input: &str) -> IResult<&str, RawEventLine<'_>> {
+    let (line_end, rem_start) = match find_eol(input.as_bytes()) {
+        Some(some) => some,
+        None => {
+            // Only time we can fail to find EOL is when it's CR at the end of the input
+            return Err(nom::Err::Incomplete(nom::Needed::Size(
+                NonZero::new(1).unwrap(),
+            )));
+        }
+    };
 
-#[inline]
-fn crlf(input: &str) -> IResult<&str, &str> {
-    tag("\u{000D}\u{000A}")(input)
-}
+    let line = &input[..line_end];
 
-#[inline]
-fn end_of_line(input: &str) -> IResult<&str, &str> {
-    alt((
-        crlf,
-        take_while_m_n(1, 1, is_cr),
-        take_while_m_n(1, 1, is_lf),
-    ))(input)
-}
+    let rem = &input[rem_start..];
 
-#[inline]
-fn comment(input: &str) -> IResult<&str, RawEventLine> {
-    preceded(
-        take_while_m_n(1, 1, is_colon),
-        terminated(take_while(is_any_char), end_of_line),
-    )(input)
-    .map(|(input, comment)| (input, RawEventLine::Comment(comment)))
-}
+    if line.is_empty() {
+        return Ok((rem, RawEventLine::Empty));
+    }
 
-#[inline]
-fn field(input: &str) -> IResult<&str, RawEventLine> {
-    terminated(
-        tuple((
-            take_while1(is_name_char),
-            opt(preceded(
-                take_while_m_n(1, 1, is_colon),
-                preceded(opt(take_while_m_n(1, 1, is_space)), take_while(is_any_char)),
-            )),
-        )),
-        end_of_line,
-    )(input)
-    .map(|(input, (field, data))| (input, RawEventLine::Field(field, data)))
-}
+    match memchr::memchr(b':', line.as_bytes()) {
+        Some(0) => Ok((rem, RawEventLine::Comment(line))),
+        Some(colon_pos) => {
+            let value_start = if line.as_bytes().get(colon_pos + 1) == Some(&b' ') {
+                colon_pos + 2
+            } else {
+                colon_pos + 1
+            };
 
-#[inline]
-fn empty(input: &str) -> IResult<&str, RawEventLine> {
-    end_of_line(input).map(|(i, _)| (i, RawEventLine::Empty))
-}
-
-pub fn line(input: &str) -> IResult<&str, RawEventLine> {
-    alt((comment, field, empty))(input)
+            Ok((
+                rem,
+                RawEventLine::Field(&line[..colon_pos], Some(&line[value_start..])),
+            ))
+        }
+        None => Ok((rem, RawEventLine::Field(line, None))),
+    }
 }
