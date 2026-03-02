@@ -82,7 +82,7 @@ pub fn line(input: &str) -> IResult<&str, RawEventLine<'_>> {
     }
 
     match memchr::memchr(b':', line.as_bytes()) {
-        Some(0) => Ok((rem, RawEventLine::Comment(line))),
+        Some(0) => Ok((rem, RawEventLine::Comment(&line[1..]))),
         Some(colon_pos) => {
             let value_start = if line.as_bytes().get(colon_pos + 1) == Some(&b' ') {
                 colon_pos + 2
