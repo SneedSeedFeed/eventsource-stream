@@ -1,6 +1,6 @@
 use std::num::NonZero;
 
-use nom::IResult;
+use nom::{IResult, Needed};
 
 /// ; ABNF definition from HTML spec
 ///
@@ -38,24 +38,24 @@ pub fn is_bom(c: char) -> bool {
     c == '\u{feff}'
 }
 
-fn find_eol(bytes: &[u8]) -> Option<(usize, usize)> {
+fn find_eol(bytes: &[u8]) -> Result<(usize, usize), Needed> {
     const CR: u8 = b'\r';
     const LF: u8 = b'\n';
-    let first_match = memchr::memchr2(CR, LF, bytes)?;
+    let first_match = memchr::memchr2(CR, LF, bytes).ok_or(Needed::Unknown)?;
 
     match bytes[first_match] {
-        LF => Some((first_match, first_match + 1)),
+        LF => Ok((first_match, first_match + 1)),
         CR => {
             if first_match + 1 >= bytes.len() {
-                return None; // need more data to see if it's CRLF or just CR
+                return Err(Needed::Size(NonZero::new(1).unwrap())); // need more data to see if it's CRLF or just CR
             }
 
             // Cr lf
             if bytes[first_match + 1] == LF {
-                Some((first_match, first_match + 2))
+                Ok((first_match, first_match + 2))
             } else {
                 // just cr
-                Some((first_match, first_match + 1))
+                Ok((first_match, first_match + 1))
             }
         }
         _ => unreachable!(),
@@ -64,12 +64,9 @@ fn find_eol(bytes: &[u8]) -> Option<(usize, usize)> {
 
 pub fn line(input: &str) -> IResult<&str, RawEventLine<'_>> {
     let (line_end, rem_start) = match find_eol(input.as_bytes()) {
-        Some(some) => some,
-        None => {
-            // Only time we can fail to find EOL is when it's CR at the end of the input
-            return Err(nom::Err::Incomplete(nom::Needed::Size(
-                NonZero::new(1).unwrap(),
-            )));
+        Ok(some) => some,
+        Err(e) => {
+            return Err(nom::Err::Incomplete(e));
         }
     };
 
