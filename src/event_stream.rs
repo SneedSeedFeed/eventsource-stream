@@ -607,4 +607,12 @@ data: test
             ]
         );
     }
+
+    #[cfg(test)]
+    const _: () = {
+        fn _assert<T: Send + Sync>() {}
+        fn _check<S: Send + Sync>() {
+            _assert::<EventStream<S>>();
+        }
+    };
 }
