@@ -155,9 +155,30 @@ impl<S> EventStream<S> {
     }
 }
 
+#[derive(Debug)]
+pub struct EventStreamError<E> {
+    kind: EventStreamErrorKind<E>,
+}
+
+impl<E> EventStreamError<E> {
+    pub fn is_utf8(&self) -> bool {
+        matches!(self.kind, EventStreamErrorKind::Utf8(_))
+    }
+
+    pub fn is_transport(&self) -> bool {
+        matches!(self.kind, EventStreamErrorKind::Transport(_))
+    }
+}
+
+impl<E> From<EventStreamErrorKind<E>> for EventStreamError<E> {
+    fn from(kind: EventStreamErrorKind<E>) -> Self {
+        Self { kind }
+    }
+}
+
 /// Error thrown while parsing an event line
 #[derive(Debug, PartialEq)]
-pub enum EventStreamError<E> {
+enum EventStreamErrorKind<E> {
     /// Source stream is not valid UTF8
     Utf8(Utf8Error),
     /// Underlying source stream error
@@ -169,9 +190,11 @@ where
     E: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Utf8(err) => f.write_fmt(format_args!("UTF8 error: {}", err)),
-            Self::Transport(err) => f.write_fmt(format_args!("Transport error: {}", err)),
+        match &self.kind {
+            EventStreamErrorKind::Utf8(err) => f.write_fmt(format_args!("UTF8 error: {}", err)),
+            EventStreamErrorKind::Transport(err) => {
+                f.write_fmt(format_args!("Transport error: {}", err))
+            }
         }
     }
 }
@@ -236,7 +259,7 @@ where
                 return Poll::Ready(Some(Ok(event)));
             }
             Ok(None) => {}
-            Err(e) => return Poll::Ready(Some(Err(EventStreamError::Utf8(e)))),
+            Err(e) => return Poll::Ready(Some(Err(EventStreamErrorKind::Utf8(e).into()))),
         }
 
         if this.state.is_terminated() {
@@ -269,11 +292,13 @@ where
                             return Poll::Ready(Some(Ok(event)));
                         }
                         Ok(None) => {}
-                        Err(e) => return Poll::Ready(Some(Err(EventStreamError::Utf8(e)))),
+                        Err(e) => {
+                            return Poll::Ready(Some(Err(EventStreamErrorKind::Utf8(e).into())))
+                        }
                     }
                 }
                 Poll::Ready(Some(Err(err))) => {
-                    return Poll::Ready(Some(Err(EventStreamError::Transport(err))))
+                    return Poll::Ready(Some(Err(EventStreamErrorKind::Transport(err).into())))
                 }
                 Poll::Ready(None) => {
                     *this.state = EventStreamState::Terminated;
