@@ -1,7 +1,3 @@
-use std::num::NonZero;
-
-use nom::{IResult, Needed};
-
 /// ; ABNF definition from HTML spec
 ///
 /// stream        = [ bom ] *event
@@ -23,7 +19,7 @@ use nom::{IResult, Needed};
 
 #[derive(Debug)]
 pub enum RawEventLine<'a> {
-    Comment(&'a str),
+    Comment,
     Field(&'a str, Option<&'a str>),
     Empty,
 }
@@ -38,48 +34,43 @@ pub fn is_bom(c: char) -> bool {
     c == '\u{feff}'
 }
 
-fn find_eol(bytes: &[u8]) -> Result<(usize, usize), Needed> {
+fn find_eol(bytes: &[u8]) -> Option<(usize, usize)> {
     const CR: u8 = b'\r';
     const LF: u8 = b'\n';
-    let first_match = memchr::memchr2(CR, LF, bytes).ok_or(Needed::Unknown)?;
+    let first_match = memchr::memchr2(CR, LF, bytes)?;
 
     match bytes[first_match] {
-        LF => Ok((first_match, first_match + 1)),
+        LF => Some((first_match, first_match + 1)),
         CR => {
             if first_match + 1 >= bytes.len() {
-                return Err(Needed::Size(NonZero::new(1).unwrap())); // need more data to see if it's CRLF or just CR
+                return None; // need more data to see if it's CRLF or just CR
             }
 
             // Cr lf
             if bytes[first_match + 1] == LF {
-                Ok((first_match, first_match + 2))
+                Some((first_match, first_match + 2))
             } else {
                 // just cr
-                Ok((first_match, first_match + 1))
+                Some((first_match, first_match + 1))
             }
         }
         _ => unreachable!(),
     }
 }
 
-pub fn line(input: &str) -> IResult<&str, RawEventLine<'_>> {
-    let (line_end, rem_start) = match find_eol(input.as_bytes()) {
-        Ok(some) => some,
-        Err(e) => {
-            return Err(nom::Err::Incomplete(e));
-        }
-    };
+pub fn line(input: &str) -> Option<(&str, RawEventLine<'_>)> {
+    let (line_end, rem_start) = find_eol(input.as_bytes())?;
 
     let line = &input[..line_end];
 
     let rem = &input[rem_start..];
 
     if line.is_empty() {
-        return Ok((rem, RawEventLine::Empty));
+        return Some((rem, RawEventLine::Empty));
     }
 
     match memchr::memchr(b':', line.as_bytes()) {
-        Some(0) => Ok((rem, RawEventLine::Comment(&line[1..]))),
+        Some(0) => Some((rem, RawEventLine::Comment)),
         Some(colon_pos) => {
             let value_start = if line.as_bytes().get(colon_pos + 1) == Some(&b' ') {
                 colon_pos + 2
@@ -87,11 +78,11 @@ pub fn line(input: &str) -> IResult<&str, RawEventLine<'_>> {
                 colon_pos + 1
             };
 
-            Ok((
+            Some((
                 rem,
                 RawEventLine::Field(&line[..colon_pos], Some(&line[value_start..])),
             ))
         }
-        None => Ok((rem, RawEventLine::Field(line, None))),
+        None => Some((rem, RawEventLine::Field(line, None))),
     }
 }
