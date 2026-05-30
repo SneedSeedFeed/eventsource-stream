@@ -10,6 +10,7 @@ const DATA_SIZE: usize = 8 * 1024 * 1024; // 8 MB
 fn build_chunks(num_chunks: usize) -> Vec<Result<String, ()>> {
     let payload = "x".repeat(DATA_SIZE);
     let full_message = format!("data: {}\n\n", payload);
+    #[allow(clippy::incompatible_msrv)] // I don't bench on msrv
     let chunk_size = full_message.len().div_ceil(num_chunks);
 
     full_message
@@ -27,7 +28,7 @@ fn bench_long_lines(c: &mut Criterion) {
     let mut group = c.benchmark_group("long_lines");
     group.throughput(Throughput::Bytes(DATA_SIZE as u64));
 
-    for num_chunks in [1, 16, 256, 4096] {
+    for num_chunks in [1, 16, 256, 4096, 65536] {
         let chunks = build_chunks(num_chunks);
 
         group.bench_with_input(
@@ -43,6 +44,7 @@ fn bench_long_lines(c: &mut Criterion) {
                             .unwrap();
                         debug_assert_eq!(events.len(), 1);
                         debug_assert_eq!(events[0].data.len(), DATA_SIZE);
+                        #[allow(clippy::incompatible_msrv)] // I don't bench on msrv
                         black_box(events)
                     },
                     BatchSize::SmallInput,

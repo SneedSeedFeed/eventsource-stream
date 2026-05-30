@@ -20,18 +20,38 @@
 #[derive(Debug)]
 pub enum RawEventLine<'a> {
     Comment,
+    Field(&'a [u8], Option<&'a [u8]>),
+    Empty,
+}
+
+#[derive(Debug)]
+pub enum ValidatedRawEventLine<'a> {
+    Comment,
     Field(&'a str, Option<&'a str>),
     Empty,
+}
+
+impl<'a> core::convert::TryFrom<RawEventLine<'a>> for ValidatedRawEventLine<'a> {
+    type Error = core::str::Utf8Error;
+
+    fn try_from(value: RawEventLine<'a>) -> Result<Self, Self::Error> {
+        match value {
+            RawEventLine::Comment => Ok(ValidatedRawEventLine::Comment),
+            RawEventLine::Field(items, items1) => Ok(ValidatedRawEventLine::Field(
+                core::str::from_utf8(items)?,
+                match items1 {
+                    Some(slice) => Some(core::str::from_utf8(slice)?),
+                    None => None,
+                },
+            )),
+            RawEventLine::Empty => Ok(ValidatedRawEventLine::Empty),
+        }
+    }
 }
 
 #[inline]
 pub fn is_lf(c: char) -> bool {
     c == '\u{000A}'
-}
-
-#[inline]
-pub fn is_bom(c: char) -> bool {
-    c == '\u{feff}'
 }
 
 /// Returns the position of the EOL or where to beging scanning next time
@@ -61,8 +81,8 @@ fn find_eol(bytes: &[u8], start: usize) -> Result<(usize, usize), usize> {
     }
 }
 
-pub fn line(input: &str, start: usize) -> Result<(&str, RawEventLine<'_>), usize> {
-    let (line_end, rem_start) = find_eol(input.as_bytes(), start)?;
+pub(crate) fn line(input: &[u8], start: usize) -> Result<(&[u8], RawEventLine<'_>), usize> {
+    let (line_end, rem_start) = find_eol(input, start)?;
 
     let line = &input[..line_end];
 
@@ -72,10 +92,10 @@ pub fn line(input: &str, start: usize) -> Result<(&str, RawEventLine<'_>), usize
         return Ok((rem, RawEventLine::Empty));
     }
 
-    match memchr::memchr(b':', line.as_bytes()) {
+    match memchr::memchr(b':', line) {
         Some(0) => Ok((rem, RawEventLine::Comment)),
         Some(colon_pos) => {
-            let value_start = if line.as_bytes().get(colon_pos + 1) == Some(&b' ') {
+            let value_start = if line.get(colon_pos + 1) == Some(&b' ') {
                 colon_pos + 2
             } else {
                 colon_pos + 1
