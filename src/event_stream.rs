@@ -119,15 +119,16 @@ impl EventStreamState {
 }
 
 pin_project! {
-/// A Stream of events
-pub struct EventStream<S> {
-    #[pin]
-    stream: Utf8Stream<S>,
-    buffer: String,
-    builder: EventBuilder,
-    state: EventStreamState,
-    last_event_id: String,
-}
+    /// A Stream of events
+    pub struct EventStream<S> {
+        #[pin]
+        stream: Utf8Stream<S>,
+        buffer: String,
+        builder: EventBuilder,
+        state: EventStreamState,
+        last_event_id: String,
+        already_scanned: usize,
+    }
 }
 
 impl<S> EventStream<S> {
@@ -139,6 +140,7 @@ impl<S> EventStream<S> {
             builder: EventBuilder::default(),
             state: EventStreamState::NotStarted,
             last_event_id: String::new(),
+            already_scanned: 0,
         }
     }
 
@@ -187,15 +189,23 @@ where
 #[cfg(feature = "std")]
 impl<E> std::error::Error for EventStreamError<E> where E: fmt::Display + fmt::Debug + Send + Sync {}
 
-fn parse_event(buffer: &mut String, builder: &mut EventBuilder) -> Option<Event> {
+fn parse_event(
+    buffer: &mut String,
+    builder: &mut EventBuilder,
+    already_scanned: &mut usize,
+) -> Option<Event> {
     if buffer.is_empty() {
         return None;
     }
     loop {
-        let (rem, next_line) = line(buffer.as_ref())?;
+        let (rem, next_line) = line(buffer.as_ref(), *already_scanned)
+            .inspect_err(|resume_from| *already_scanned = *resume_from)
+            .ok()?;
         builder.add(next_line);
         let consumed = buffer.len() - rem.len();
         let rem = buffer.split_off(consumed);
+
+        *already_scanned = 0;
         *buffer = rem;
         if builder.is_complete {
             if let Some(event) = builder.dispatch() {
@@ -215,7 +225,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        if let Some(event) = parse_event(this.buffer, this.builder) {
+        if let Some(event) = parse_event(this.buffer, this.builder, this.already_scanned) {
             *this.last_event_id = event.id.clone();
             return Poll::Ready(Some(Ok(event)));
         }
@@ -236,14 +246,16 @@ where
                     } else {
                         *this.state = EventStreamState::Started;
                         if is_bom(string.chars().next().unwrap()) {
-                            &string[1..]
+                            &string[3..]
                         } else {
                             &string
                         }
                     };
                     this.buffer.push_str(slice);
 
-                    if let Some(event) = parse_event(this.buffer, this.builder) {
+                    if let Some(event) =
+                        parse_event(this.buffer, this.builder, this.already_scanned)
+                    {
                         *this.last_event_id = event.id.clone();
                         return Poll::Ready(Some(Ok(event)));
                     }
