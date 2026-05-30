@@ -1,12 +1,11 @@
 #[cfg(not(feature = "std"))]
 use alloc::string::{FromUtf8Error, String, ToString};
 
-#[cfg(feature = "std")]
-use std::string::FromUtf8Error;
+use std::convert::TryFrom;
+use std::str::Utf8Error;
 
 use crate::event::Event;
-use crate::parser::{is_bom, is_lf, line, RawEventLine};
-use crate::utf8_stream::{Utf8Stream, Utf8StreamError};
+use crate::parser::{is_lf, line, ValidatedRawEventLine};
 use core::fmt;
 use core::pin::Pin;
 use core::time::Duration;
@@ -41,9 +40,9 @@ impl EventBuilder {
     ///
     /// -> Otherwise
     ///    The field is ignored.
-    fn add(&mut self, line: RawEventLine) {
+    fn add(&mut self, line: ValidatedRawEventLine) {
         match line {
-            RawEventLine::Field(field, val) => {
+            ValidatedRawEventLine::Field(field, val) => {
                 let val = val.unwrap_or("");
                 match field {
                     "event" => {
@@ -66,8 +65,8 @@ impl EventBuilder {
                     _ => {}
                 }
             }
-            RawEventLine::Comment => {}
-            RawEventLine::Empty => self.is_complete = true,
+            ValidatedRawEventLine::Comment => {}
+            ValidatedRawEventLine::Empty => self.is_complete = true,
         }
     }
 
@@ -122,8 +121,8 @@ pin_project! {
     /// A Stream of events
     pub struct EventStream<S> {
         #[pin]
-        stream: Utf8Stream<S>,
-        buffer: String,
+        stream: S,
+        buffer: Vec<u8>,
         builder: EventBuilder,
         state: EventStreamState,
         last_event_id: String,
@@ -135,8 +134,8 @@ impl<S> EventStream<S> {
     /// Initialize the EventStream with a Stream
     pub fn new(stream: S) -> Self {
         Self {
-            stream: Utf8Stream::new(stream),
-            buffer: String::new(),
+            stream,
+            buffer: Vec::new(),
             builder: EventBuilder::default(),
             state: EventStreamState::NotStarted,
             last_event_id: String::new(),
@@ -160,18 +159,9 @@ impl<S> EventStream<S> {
 #[derive(Debug, PartialEq)]
 pub enum EventStreamError<E> {
     /// Source stream is not valid UTF8
-    Utf8(FromUtf8Error),
+    Utf8(Utf8Error),
     /// Underlying source stream error
     Transport(E),
-}
-
-impl<E> From<Utf8StreamError<E>> for EventStreamError<E> {
-    fn from(err: Utf8StreamError<E>) -> Self {
-        match err {
-            Utf8StreamError::Utf8(err) => Self::Utf8(err),
-            Utf8StreamError::Transport(err) => Self::Transport(err),
-        }
-    }
 }
 
 impl<E> fmt::Display for EventStreamError<E>
@@ -190,18 +180,22 @@ where
 impl<E> std::error::Error for EventStreamError<E> where E: fmt::Display + fmt::Debug + Send + Sync {}
 
 fn parse_event(
-    buffer: &mut String,
+    buffer: &mut Vec<u8>,
     builder: &mut EventBuilder,
     already_scanned: &mut usize,
-) -> Option<Event> {
+) -> Result<Option<Event>, Utf8Error> {
     if buffer.is_empty() {
-        return None;
+        return Ok(None);
     }
     loop {
-        let (rem, next_line) = line(buffer.as_ref(), *already_scanned)
+        let (rem, next_line) = match line(buffer.as_ref(), *already_scanned)
             .inspect_err(|resume_from| *already_scanned = *resume_from)
-            .ok()?;
-        builder.add(next_line);
+        {
+            Ok(o) => o,
+            Err(_) => return Ok(None),
+        };
+        let validated_line = ValidatedRawEventLine::try_from(next_line)?;
+        builder.add(validated_line);
         let consumed = buffer.len() - rem.len();
         let rem = buffer.split_off(consumed);
 
@@ -209,11 +203,22 @@ fn parse_event(
         *buffer = rem;
         if builder.is_complete {
             if let Some(event) = builder.dispatch() {
-                return Some(event);
+                return Ok(Some(event));
             }
         }
     }
 }
+
+/// Byte Order Mark as char
+const BOM_CHAR: char = '\u{FEFF}';
+const BOM_LEN: usize = BOM_CHAR.len_utf8();
+// bom           = %xFEFF ; U+FEFF BYTE ORDER MARK
+/// Byte representation of the BOM [`char`]
+pub(crate) const BOM: &[u8; BOM_LEN] = &{
+    let mut buf = [0u8; BOM_LEN];
+    BOM_CHAR.encode_utf8(&mut buf);
+    buf
+};
 
 impl<S, B, E> Stream for EventStream<S>
 where
@@ -225,9 +230,13 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        if let Some(event) = parse_event(this.buffer, this.builder, this.already_scanned) {
-            *this.last_event_id = event.id.clone();
-            return Poll::Ready(Some(Ok(event)));
+        match parse_event(this.buffer, this.builder, this.already_scanned) {
+            Ok(Some(event)) => {
+                *this.last_event_id = event.id.clone();
+                return Poll::Ready(Some(Ok(event)));
+            }
+            Ok(None) => {}
+            Err(e) => return Poll::Ready(Some(Err(EventStreamError::Utf8(e)))),
         }
 
         if this.state.is_terminated() {
@@ -236,31 +245,36 @@ where
 
         loop {
             match this.stream.as_mut().poll_next(cx) {
-                Poll::Ready(Some(Ok(string))) => {
-                    if string.is_empty() {
+                Poll::Ready(Some(Ok(slice))) => {
+                    let slice = slice.as_ref();
+                    if slice.is_empty() {
                         continue;
                     }
 
                     let slice = if this.state.is_started() {
-                        &string
+                        slice
                     } else {
                         *this.state = EventStreamState::Started;
-                        if is_bom(string.chars().next().unwrap()) {
-                            &string[3..]
+                        if slice.starts_with(BOM) {
+                            &slice[3..]
                         } else {
-                            &string
+                            slice
                         }
                     };
-                    this.buffer.push_str(slice);
+                    this.buffer.extend_from_slice(slice);
 
-                    if let Some(event) =
-                        parse_event(this.buffer, this.builder, this.already_scanned)
-                    {
-                        *this.last_event_id = event.id.clone();
-                        return Poll::Ready(Some(Ok(event)));
+                    match parse_event(this.buffer, this.builder, this.already_scanned) {
+                        Ok(Some(event)) => {
+                            *this.last_event_id = event.id.clone();
+                            return Poll::Ready(Some(Ok(event)));
+                        }
+                        Ok(None) => {}
+                        Err(e) => return Poll::Ready(Some(Err(EventStreamError::Utf8(e)))),
                     }
                 }
-                Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
+                Poll::Ready(Some(Err(err))) => {
+                    return Poll::Ready(Some(Err(EventStreamError::Transport(err))))
+                }
                 Poll::Ready(None) => {
                     *this.state = EventStreamState::Terminated;
                     return Poll::Ready(None);
