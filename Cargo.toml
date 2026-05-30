@@ -1,6 +1,6 @@
 [package]
 name = "eventsource-stream2"
-version = "0.3.1"
+version = "0.4.0"
 authors = [
     "Julian Popescu <jpopesculian@gmail.com>",
     "Adam Stopher <adam.stopher@protonmail.com>",
