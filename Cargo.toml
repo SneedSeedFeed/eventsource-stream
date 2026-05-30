@@ -1,6 +1,6 @@
 [package]
 name = "eventsource-stream2"
-version = "0.3.0"
+version = "0.3.1"
 authors = [
     "Julian Popescu <jpopesculian@gmail.com>",
     "Adam Stopher <adam.stopher@protonmail.com>",
@@ -31,8 +31,18 @@ memchr = { version = "2.8.1", default-features = false }
 pin-project-lite = "0.2.17"
 
 [dev-dependencies]
+criterion = { version = "0.8.2", features = ["async_tokio"] }
 futures = "0.3.32"
 http = "1.4.1"
 reqwest = { version = "0.13.4", features = ["stream"] }
-tokio = { version = "1.52", features = ["macros", "rt"] }
+tokio = { version = "1.52", features = ["macros", "rt", "rt-multi-thread"] }
 url = "2.5"
+
+[profile.flamegraph]
+inherits = "release"
+debug = true
+
+
+[[bench]]
+name = "long_lines"
+harness = false
