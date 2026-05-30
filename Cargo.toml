@@ -1,6 +1,6 @@
 [package]
 name = "eventsource-stream2"
-version = "0.2.3"
+version = "0.3.0"
 authors = [
     "Julian Popescu <jpopesculian@gmail.com>",
     "Adam Stopher <adam.stopher@protonmail.com>",
@@ -12,7 +12,7 @@ readme = "README.md"
 homepage = "https://github.com/SneedSeedFeed/eventsource-stream"
 documentation = "https://docs.rs/eventsource-stream2/"
 repository = "https://github.com/SneedSeedFeed/eventsource-stream"
-description = "A basic building block for building an Eventsource from a Stream of bytes, and updated fork of eventsource-stream."
+description = "A basic building block for building an Eventsource from a Stream of bytes, an updated fork of eventsource-stream."
 keywords = ["sse", "eventsource", "stream", "parse", "event"]
 categories = [
     "web-programming::http-client",
