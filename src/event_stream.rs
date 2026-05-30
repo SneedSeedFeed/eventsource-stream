@@ -246,7 +246,7 @@ where
                     } else {
                         *this.state = EventStreamState::Started;
                         if is_bom(string.chars().next().unwrap()) {
-                            &string[1..]
+                            &string[3..]
                         } else {
                             &string
                         }
