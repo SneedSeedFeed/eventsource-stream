@@ -170,6 +170,34 @@ impl<E> EventStreamError<E> {
     pub fn is_transport(&self) -> bool {
         matches!(self.kind, EventStreamErrorKind::Transport(_))
     }
+
+    pub fn as_transport(&self) -> Option<&E> {
+        match &self.kind {
+            EventStreamErrorKind::Utf8(_) => None,
+            EventStreamErrorKind::Transport(transport) => Some(transport),
+        }
+    }
+
+    pub fn into_transport(self) -> Option<E> {
+        match self.kind {
+            EventStreamErrorKind::Utf8(_) => None,
+            EventStreamErrorKind::Transport(transport) => Some(transport),
+        }
+    }
+
+    pub fn as_utf8(&self) -> Option<&Utf8Error> {
+        match &self.kind {
+            EventStreamErrorKind::Utf8(utf8) => Some(utf8),
+            EventStreamErrorKind::Transport(_) => None,
+        }
+    }
+
+    pub fn into_utf8(self) -> Option<Utf8Error> {
+        match self.kind {
+            EventStreamErrorKind::Utf8(utf8) => Some(utf8),
+            EventStreamErrorKind::Transport(_) => None,
+        }
+    }
 }
 
 impl<E> From<EventStreamErrorKind<E>> for EventStreamError<E> {
