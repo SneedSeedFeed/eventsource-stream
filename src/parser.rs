@@ -23,7 +23,7 @@ use nom::{IResult, Needed};
 
 #[derive(Debug)]
 pub enum RawEventLine<'a> {
-    Comment(&'a str),
+    Comment,
     Field(&'a str, Option<&'a str>),
     Empty,
 }
@@ -79,7 +79,7 @@ pub fn line(input: &str) -> IResult<&str, RawEventLine<'_>> {
     }
 
     match memchr::memchr(b':', line.as_bytes()) {
-        Some(0) => Ok((rem, RawEventLine::Comment(&line[1..]))),
+        Some(0) => Ok((rem, RawEventLine::Comment)),
         Some(colon_pos) => {
             let value_start = if line.as_bytes().get(colon_pos + 1) == Some(&b' ') {
                 colon_pos + 2
