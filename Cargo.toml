@@ -23,12 +23,11 @@ categories = [
 
 [features]
 default = ["std"]
-std = ["futures-core/std", "nom/std"]
+std = ["futures-core/std", "memchr/std", "memchr/use_std"]
 
 [dependencies]
 futures-core = { version = "0.3.32", default-features = false }
-memchr = { version = "2.8.1", features = ["std"] }
-nom = { version = "7.1", default-features = false }
+memchr = { version = "2.8.1", default-features = false }
 pin-project-lite = "0.2.17"
 
 [dev-dependencies]

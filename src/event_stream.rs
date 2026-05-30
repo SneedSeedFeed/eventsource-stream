@@ -12,7 +12,6 @@ use core::pin::Pin;
 use core::time::Duration;
 use futures_core::stream::Stream;
 use futures_core::task::{Context, Poll};
-use nom::error::Error as NomError;
 use pin_project_lite::pin_project;
 
 #[derive(Default, Debug)]
@@ -160,8 +159,6 @@ impl<S> EventStream<S> {
 pub enum EventStreamError<E> {
     /// Source stream is not valid UTF8
     Utf8(FromUtf8Error),
-    /// Source stream is not a valid EventStream
-    Parser(NomError<String>),
     /// Underlying source stream error
     Transport(E),
 }
@@ -175,12 +172,6 @@ impl<E> From<Utf8StreamError<E>> for EventStreamError<E> {
     }
 }
 
-impl<E> From<NomError<&str>> for EventStreamError<E> {
-    fn from(err: NomError<&str>) -> Self {
-        EventStreamError::Parser(NomError::new(err.input.to_string(), err.code))
-    }
-}
-
 impl<E> fmt::Display for EventStreamError<E>
 where
     E: fmt::Display,
@@ -188,7 +179,6 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Utf8(err) => f.write_fmt(format_args!("UTF8 error: {}", err)),
-            Self::Parser(err) => f.write_fmt(format_args!("Parse error: {}", err)),
             Self::Transport(err) => f.write_fmt(format_args!("Transport error: {}", err)),
         }
     }
@@ -197,28 +187,20 @@ where
 #[cfg(feature = "std")]
 impl<E> std::error::Error for EventStreamError<E> where E: fmt::Display + fmt::Debug + Send + Sync {}
 
-fn parse_event<E>(
-    buffer: &mut String,
-    builder: &mut EventBuilder,
-) -> Result<Option<Event>, EventStreamError<E>> {
+fn parse_event(buffer: &mut String, builder: &mut EventBuilder) -> Option<Event> {
     if buffer.is_empty() {
-        return Ok(None);
+        return None;
     }
     loop {
-        match line(buffer.as_ref()) {
-            Ok((rem, next_line)) => {
-                builder.add(next_line);
-                let consumed = buffer.len() - rem.len();
-                let rem = buffer.split_off(consumed);
-                *buffer = rem;
-                if builder.is_complete {
-                    if let Some(event) = builder.dispatch() {
-                        return Ok(Some(event));
-                    }
-                }
+        let (rem, next_line) = line(buffer.as_ref())?;
+        builder.add(next_line);
+        let consumed = buffer.len() - rem.len();
+        let rem = buffer.split_off(consumed);
+        *buffer = rem;
+        if builder.is_complete {
+            if let Some(event) = builder.dispatch() {
+                return Some(event);
             }
-            Err(nom::Err::Incomplete(_)) => return Ok(None),
-            Err(nom::Err::Error(err)) | Err(nom::Err::Failure(err)) => return Err(err.into()),
         }
     }
 }
@@ -233,13 +215,9 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        match parse_event(this.buffer, this.builder) {
-            Ok(Some(event)) => {
-                *this.last_event_id = event.id.clone();
-                return Poll::Ready(Some(Ok(event)));
-            }
-            Err(err) => return Poll::Ready(Some(Err(err))),
-            _ => {}
+        if let Some(event) = parse_event(this.buffer, this.builder) {
+            *this.last_event_id = event.id.clone();
+            return Poll::Ready(Some(Ok(event)));
         }
 
         if this.state.is_terminated() {
@@ -265,13 +243,9 @@ where
                     };
                     this.buffer.push_str(slice);
 
-                    match parse_event(this.buffer, this.builder) {
-                        Ok(Some(event)) => {
-                            *this.last_event_id = event.id.clone();
-                            return Poll::Ready(Some(Ok(event)));
-                        }
-                        Err(err) => return Poll::Ready(Some(Err(err))),
-                        _ => {}
+                    if let Some(event) = parse_event(this.buffer, this.builder) {
+                        *this.last_event_id = event.id.clone();
+                        return Poll::Ready(Some(Ok(event)));
                     }
                 }
                 Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
