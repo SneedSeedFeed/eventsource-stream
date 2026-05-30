@@ -20,6 +20,8 @@ categories = [
     "parsing",
     "asynchronous",
 ]
+# found via cargo-msrv
+rust-version = "1.61.0"
 
 [features]
 default = ["std"]

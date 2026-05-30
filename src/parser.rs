@@ -38,9 +38,9 @@ impl<'a> core::convert::TryFrom<RawEventLine<'a>> for ValidatedRawEventLine<'a> 
         match value {
             RawEventLine::Comment => Ok(ValidatedRawEventLine::Comment),
             RawEventLine::Field(items, items1) => Ok(ValidatedRawEventLine::Field(
-                str::from_utf8(items)?,
+                core::str::from_utf8(items)?,
                 match items1 {
-                    Some(slice) => Some(str::from_utf8(slice)?),
+                    Some(slice) => Some(core::str::from_utf8(slice)?),
                     None => None,
                 },
             )),

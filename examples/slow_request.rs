@@ -17,6 +17,8 @@ async fn main() {
     let expected_data: String = "x".repeat(DATA_SIZE);
     let full_message = format!("data: {}\n\n", expected_data);
 
+    #[allow(clippy::incompatible_msrv)]
+    // this example isn't even intended to be a "real" example just a way for me to benchmark
     let chunk_size = full_message.len().div_ceil(num_chunks);
 
     let chunks: Vec<Result<String, ()>> = full_message

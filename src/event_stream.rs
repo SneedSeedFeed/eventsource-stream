@@ -241,11 +241,12 @@ fn parse_event(
         return Ok(None);
     }
     loop {
-        let (rem, next_line) = match line(buffer.as_ref(), *already_scanned)
-            .inspect_err(|resume_from| *already_scanned = *resume_from)
-        {
+        let (rem, next_line) = match line(buffer.as_ref(), *already_scanned) {
             Ok(o) => o,
-            Err(_) => return Ok(None),
+            Err(resume_from) => {
+                *already_scanned = resume_from;
+                return Ok(None);
+            }
         };
         let validated_line = ValidatedRawEventLine::try_from(next_line)?;
         builder.add(validated_line);
@@ -262,16 +263,9 @@ fn parse_event(
     }
 }
 
-/// Byte Order Mark as char
-const BOM_CHAR: char = '\u{FEFF}';
-const BOM_LEN: usize = BOM_CHAR.len_utf8();
 // bom           = %xFEFF ; U+FEFF BYTE ORDER MARK
-/// Byte representation of the BOM [`char`]
-pub(crate) const BOM: &[u8; BOM_LEN] = &{
-    let mut buf = [0u8; BOM_LEN];
-    BOM_CHAR.encode_utf8(&mut buf);
-    buf
-};
+/// Byte representation of the BOM
+pub(crate) const BOM: &[u8; 3] = &[0xEF, 0xBB, 0xBF];
 
 impl<S, B, E> Stream for EventStream<S>
 where
