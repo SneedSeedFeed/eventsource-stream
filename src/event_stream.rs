@@ -102,7 +102,7 @@ impl EventBuilder {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum EventStreamState {
+enum EventStreamState {
     NotStarted,
     Started,
     Terminated,
