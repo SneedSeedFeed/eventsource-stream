@@ -27,7 +27,7 @@ fn bench_long_lines(c: &mut Criterion) {
     let mut group = c.benchmark_group("long_lines");
     group.throughput(Throughput::Bytes(DATA_SIZE as u64));
 
-    for num_chunks in [1, 16, 256, 4096] {
+    for num_chunks in [1, 16, 256, 4096, 65536] {
         let chunks = build_chunks(num_chunks);
 
         group.bench_with_input(
