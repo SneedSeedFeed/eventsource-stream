@@ -1,13 +1,15 @@
 #[cfg(not(feature = "std"))]
-use alloc::string::{FromUtf8Error, String, ToString};
-
-use std::convert::TryFrom;
-use std::str::Utf8Error;
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use crate::event::Event;
 use crate::parser::{is_lf, line, ValidatedRawEventLine};
+use core::convert::TryFrom;
 use core::fmt;
 use core::pin::Pin;
+use core::str::Utf8Error;
 use core::time::Duration;
 use futures_core::stream::Stream;
 use futures_core::task::{Context, Poll};
@@ -313,6 +315,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "std"))]
+    use alloc::vec;
     use futures::prelude::*;
 
     #[tokio::test]

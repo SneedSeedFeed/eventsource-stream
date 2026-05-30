@@ -31,8 +31,8 @@ pub enum ValidatedRawEventLine<'a> {
     Empty,
 }
 
-impl<'a> std::convert::TryFrom<RawEventLine<'a>> for ValidatedRawEventLine<'a> {
-    type Error = std::str::Utf8Error;
+impl<'a> core::convert::TryFrom<RawEventLine<'a>> for ValidatedRawEventLine<'a> {
+    type Error = core::str::Utf8Error;
 
     fn try_from(value: RawEventLine<'a>) -> Result<Self, Self::Error> {
         match value {
@@ -81,7 +81,7 @@ fn find_eol(bytes: &[u8], start: usize) -> Result<(usize, usize), usize> {
     }
 }
 
-pub fn line(input: &[u8], start: usize) -> Result<(&[u8], RawEventLine<'_>), usize> {
+pub(crate) fn line(input: &[u8], start: usize) -> Result<(&[u8], RawEventLine<'_>), usize> {
     let (line_end, rem_start) = find_eol(input, start)?;
 
     let line = &input[..line_end];
